@@ -91,7 +91,7 @@ before authentication, because `isSignedTrustManifest` requires an `rtmr1_allowl
 field the testnet manifest does not publish. **The pin to 5.2.0 in `ops/package.json`
 is deliberate. Do not bump it until the manifest publishes that field.**
 `npm run t3n -- doctor` fails loudly if it drifts. Full root cause, version bisect and
-a runnable reproduction: [`t3n-sdk-manifest-bug`](../t3n-sdk-manifest-bug).
+a runnable reproduction: [`t3n-sdk-manifest-bug`](https://github.com/ExpertVagabond/t3n-sdk-manifest-bug).
 
 ## Licence
 

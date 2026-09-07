@@ -146,7 +146,7 @@ npm run t3n -- list
 
 > **Pin `@terminal3/t3n-sdk@5.2.0`.** Versions >= 5.3.0 cannot reach testnet at all —
 > they reject the trust manifest before authentication is attempted. Root cause,
-> bisect and reproduction: [`t3n-sdk-manifest-bug`](../t3n-sdk-manifest-bug).
+> bisect and reproduction: [`t3n-sdk-manifest-bug`](https://github.com/ExpertVagabond/t3n-sdk-manifest-bug).
 > `npm run t3n -- doctor` fails loudly if the pin has drifted.
 
 ## Operating it

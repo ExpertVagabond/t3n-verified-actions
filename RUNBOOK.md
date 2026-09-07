@@ -68,7 +68,7 @@ gives you no automatic path out of `unverified` — a human decides.
 
 **`Trust manifest ... is malformed`**
 The SDK pin has drifted above 5.2.0. `doctor` catches this first and prints the fix.
-Root cause and reproduction: [`t3n-sdk-manifest-bug`](../t3n-sdk-manifest-bug).
+Root cause and reproduction: [`t3n-sdk-manifest-bug`](https://github.com/ExpertVagabond/t3n-sdk-manifest-bug).
 
 **`AccessDenied` reading the ledger**
 The map ACL points at a stale `contract_id`. You re-registered without re-running

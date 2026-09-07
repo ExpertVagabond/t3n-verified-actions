@@ -84,7 +84,7 @@ export function die(context: string, e: unknown): never {
       "\nThis is the known SDK regression: >=5.3.0 requires an rtmr1_allowlist field\n" +
         "that the testnet manifest does not publish. Pin 5.2.0:\n" +
         "  npm install @terminal3/t3n-sdk@5.2.0\n" +
-        "See https://github.com/<owner>/t3n-sdk-manifest-bug",
+        "See https://github.com/ExpertVagabond/t3n-sdk-manifest-bug",
     );
   }
   process.exit(1);
