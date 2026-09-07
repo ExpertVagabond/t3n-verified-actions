@@ -17,10 +17,19 @@
  * an independent read-back of /deliveries reveals it never went out.
  */
 
+// CORS is open because the submission page calls these endpoints directly from
+// the browser to demonstrate the difference between "the transport said 200" and
+// "the effect actually happened". Nothing here is sensitive.
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
+
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj, null, 2), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...CORS },
   });
 
 function outcomeFor(invoice) {
@@ -32,6 +41,8 @@ function outcomeFor(invoice) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (url.pathname === "/notify" && request.method === "POST") {
       let invoice = "unknown";

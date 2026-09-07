@@ -78,6 +78,39 @@
   blockquote p{margin:0}
   footer{padding:44px 0 72px;color:var(--dim);font-size:14px}
   ul{max-width:68ch;padding-left:22px} li{margin-bottom:9px}
+  /* Interactive demo */
+  .try{background:linear-gradient(180deg,#141b2b 0%,var(--panel) 100%);
+    border:1px solid var(--line);border-radius:14px;padding:26px;margin:8px 0 0}
+  .try h2{margin:0 0 6px}
+  .scen{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0 6px}
+  .scen button{cursor:pointer;font:inherit;font-size:14.5px;font-weight:600;padding:12px 16px;
+    border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);
+    transition:border-color .15s,transform .05s;text-align:left;line-height:1.35}
+  .scen button:hover:not(:disabled){border-color:var(--accent)}
+  .scen button:active:not(:disabled){transform:translateY(1px)}
+  .scen button:disabled{opacity:.5;cursor:progress}
+  .scen button small{display:block;font-weight:400;color:var(--dim);font-size:12.5px;margin-top:3px}
+  .scen button.lie:hover:not(:disabled){border-color:var(--bad)}
+  .panes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+  @media(max-width:680px){.panes{grid-template-columns:1fr}}
+  .pane{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:18px;min-height:250px}
+  .pane.win{border-color:rgba(99,214,139,.45)}
+  .pane.lose{border-color:rgba(255,107,107,.45)}
+  .pane h4{margin:0 0 3px;font-size:15px}
+  .pane .who{color:var(--dim);font-size:12.5px;margin:0 0 14px}
+  .step{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.5;
+    margin:0 0 9px;opacity:0;transform:translateY(4px);animation:in .3s ease forwards;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  @keyframes in{to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){.step{animation:none;opacity:1;transform:none}}
+  .step .ic{flex:0 0 16px;text-align:center}
+  .verdict{margin-top:16px;padding:13px 15px;border-radius:9px;font-weight:700;font-size:15px;
+    display:flex;gap:9px;align-items:center}
+  .verdict.ok{background:rgba(99,214,139,.12);color:var(--good)}
+  .verdict.bad{background:rgba(255,107,107,.12);color:var(--bad)}
+  .verdict small{display:block;font-weight:400;color:var(--muted);font-size:12.5px;margin-top:3px}
+  .note{color:var(--dim);font-size:13px;margin-top:16px}
+
 </style>
 </head>
 <body>
@@ -107,6 +140,120 @@
     </div>
   </div>
 </header>
+
+<section id="try">
+  <div class="wrap">
+    <div class="try">
+      <h2>Try it. Click a button.</h2>
+      <p class="sub" style="margin-bottom:0">These are real HTTP calls to a live endpoint. Watch the two
+      agents disagree.</p>
+      <div class="scen">
+        <button id="b-ok">Notify invoice INV-1042<small>this one actually gets delivered</small></button>
+        <button id="b-lie" class="lie">Notify invoice LIE-1043<small>returns 200 &mdash; and is never delivered</small></button>
+      </div>
+      <div class="panes">
+        <div class="pane" id="p-naive">
+          <h4>A typical agent</h4>
+          <p class="who">Trusts the status code</p>
+          <div id="s-naive"></div>
+        </div>
+        <div class="pane" id="p-ver">
+          <h4>z-verified-actions</h4>
+          <p class="who">Checks before it claims anything</p>
+          <div id="s-ver"></div>
+        </div>
+      </div>
+      <p class="note">The page calls the same two endpoints the contract calls. In production this runs
+      inside the TEE and each step is written to an append-only ledger with a Merkle-anchored receipt.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  var API = "https://t3n-verified-actions-demo.purplesquirrelnetworks.workers.dev";
+  var naive = document.getElementById("s-naive"), ver = document.getElementById("s-ver");
+  var pn = document.getElementById("p-naive"), pv = document.getElementById("p-ver");
+  var bOk = document.getElementById("b-ok"), bLie = document.getElementById("b-lie");
+  var wait = function(ms){ return new Promise(function(r){ setTimeout(r, ms); }); };
+
+  function step(el, ic, text, cls){
+    var d = document.createElement("div");
+    d.className = "step";
+    d.innerHTML = '<span class="ic">' + ic + '</span><span' + (cls ? ' class="'+cls+'"' : '') + '>' + text + '</span>';
+    el.appendChild(d);
+  }
+  function verdict(el, ok, big, small){
+    var d = document.createElement("div");
+    d.className = "verdict " + (ok ? "ok" : "bad");
+    d.innerHTML = "<div>" + big + "<small>" + small + "</small></div>";
+    el.appendChild(d);
+  }
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
+
+  async function run(invoice){
+    bOk.disabled = bLie.disabled = true;
+    naive.innerHTML = ""; ver.innerHTML = "";
+    pn.className = "pane"; pv.className = "pane";
+
+    step(naive, "→", "POST /notify  " + esc(invoice));
+    step(ver,   "→", "submit-action  " + esc(invoice));
+    await wait(600);
+
+    var post, code = 0;
+    try {
+      var r = await fetch(API + "/notify", {
+        method: "POST", headers: {"content-type":"application/json"},
+        body: JSON.stringify({ invoice: invoice })
+      });
+      code = r.status; post = await r.json();
+    } catch (e) {
+      step(naive, "✕", "network error", "bad"); step(ver, "✕", "network error", "bad");
+      bOk.disabled = bLie.disabled = false; return;
+    }
+
+    step(naive, "←", "HTTP " + code + '  {"accepted":true}', "good");
+    step(ver,   "←", "HTTP " + code + '  {"accepted":true}', "good");
+    await wait(700);
+
+    step(naive, "✓", "status code is 2xx", "good");
+    step(ver,   "•", "status=pending_verification", "warn");
+    await wait(500);
+    step(ver,   "•", "a 2xx is not evidence", "muted");
+    await wait(700);
+
+    verdict(naive, true, "✅ Reported: delivered",
+      "Nothing was checked. The status code was the whole basis.");
+    await wait(500);
+
+    step(ver, "→", "verify-action &rarr; GET /deliveries");
+    await wait(900);
+
+    var del;
+    try {
+      var r2 = await fetch(API + "/deliveries?invoice=" + encodeURIComponent(invoice));
+      del = await r2.json();
+    } catch (e) {
+      step(ver, "✕", "probe failed", "bad"); bOk.disabled = bLie.disabled = false; return;
+    }
+    step(ver, "←", 'state: "' + esc(del.state) + '"', del.state === "delivered" ? "good" : "bad");
+    await wait(600);
+
+    if (del.state === "delivered") {
+      verdict(ver, true, "✅ confirmed", "Independently verified against external state.");
+      pn.className = "pane win"; pv.className = "pane win";
+    } else {
+      verdict(ver, false, "⚠️ unverified",
+        'It was never delivered. state is "' + esc(del.state) + '". Escalated to a human, never auto-retried.');
+      pn.className = "pane lose"; pv.className = "pane win";
+    }
+    bOk.disabled = bLie.disabled = false;
+  }
+
+  bOk.addEventListener("click", function(){ run("INV-1042"); });
+  bLie.addEventListener("click", function(){ run("LIE-1043"); });
+})();
+</script>
 
 <section>
   <div class="wrap">
