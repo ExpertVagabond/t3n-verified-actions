@@ -1,0 +1,73 @@
+/// z-verified-actions — an append-only, offline-verifiable action ledger for
+/// enterprise agents running inside a T3N TEE.
+///
+/// The premise: **a 2xx response is not evidence that an action happened.**
+/// Transports lie. A mail API returns 200 and saves a draft; a webhook returns
+/// 202 and drops the job; a retry double-charges because the first call was
+/// recorded as failed when it actually succeeded. An agent that reports success
+/// from a status code will eventually report something that did not happen.
+///
+/// So this contract splits every side effect into two phases that cannot be
+/// collapsed:
+///
+///   submit-action  performs the effect exactly once per idempotency key and
+///                  records it as `pending-verification`. It never returns
+///                  "confirmed", no matter what the upstream said.
+///
+///   verify-action  performs an INDEPENDENT read-back — a different request,
+///                  against the state the effect was supposed to change — and
+///                  only that transition can mark a record `confirmed`.
+///
+/// Every write sets a SHA-256 claims digest over the canonical record via
+/// kv-store.set-claims-digest, so the entry lands in the transaction's Merkle
+/// leaf and an auditor can verify a receipt offline without trusting the node.
+///
+/// Imported host capabilities (the WIT imports ARE the capability set — there
+/// is no separate manifest):
+///   - tenant-context: tenant DID, contract id, cluster timestamp, seq no
+///   - logging:        operator-visible audit lines
+///   - kv-store:       the ledger itself, plus the Merkle claims digest
+///   - http:           performs the effect and the independent verification probe
+package z:verified-actions@0.1.0;
+
+world verified-actions {
+    import host:tenant/tenant-context@1.0.0;
+    import host:interfaces/logging@2.1.0;
+    import host:interfaces/kv-store@2.1.0;
+    import host:interfaces/http@2.1.0;
+
+    export contracts;
+}
+
+interface contracts {
+    /// Standard 3-field envelope used by all node-callable contracts.
+    ///   input        — JSON request payload for this function
+    ///   user-profile — always None for tenant contracts
+    ///   context      — node-minted DynamicContext (trusted)
+    record generic-input {
+        input:        option<list<u8>>,
+        user-profile: option<list<u8>>,
+        context:      option<list<u8>>,
+    }
+
+    /// Perform a side effect at most once per idempotency key, and record it.
+    ///
+    /// If the key already exists the stored record is returned unchanged and
+    /// NO outbound call is made — this is the double-send guard. The returned
+    /// record is always `pending-verification` or a terminal state carried over
+    /// from a previous call; this function can never produce `confirmed`.
+    submit-action: func(req: generic-input) -> result<list<u8>, string>;
+
+    /// Independently re-read external state and settle the record.
+    ///
+    /// Issues the verification probe declared on the record, applies the
+    /// declared expectation, and transitions to `confirmed` or `unverified`.
+    /// Safe to call repeatedly; already-confirmed records are returned as-is.
+    verify-action: func(req: generic-input) -> result<list<u8>, string>;
+
+    /// Read one ledger record by idempotency key.
+    get-record: func(req: generic-input) -> result<list<u8>, string>;
+
+    /// Range-scan the ledger. Returns records in lexicographic key order.
+    list-records: func(req: generic-input) -> result<list<u8>, string>;
+}

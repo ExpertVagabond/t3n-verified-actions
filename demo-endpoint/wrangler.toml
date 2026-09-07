@@ -1,0 +1,7 @@
+name = "t3n-verified-actions-demo"
+# Set your own, or export CLOUDFLARE_ACCOUNT_ID. Required only if your
+# wrangler login has access to more than one account.
+# account_id = "..."
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true

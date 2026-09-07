@@ -1,0 +1,28 @@
+{
+  "idempotency_key": "demo-lying-001",
+  "method": "POST",
+  "url": "https://t3n-verified-actions-demo.purplesquirrelnetworks.workers.dev/notify",
+  "headers": [
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "body": "{\"invoice\": \"LIE-1043\"}",
+  "verify": {
+    "method": "GET",
+    "url": "https://t3n-verified-actions-demo.purplesquirrelnetworks.workers.dev/deliveries?invoice=LIE-1043",
+    "headers": [],
+    "expect": {
+      "status": 200,
+      "body_contains": [
+        "LIE-1043",
+        "\"state\": \"delivered\""
+      ],
+      "body_absent": [
+        "\"state\": \"queued\"",
+        "\"state\": \"failed\""
+      ]
+    }
+  }
+}
