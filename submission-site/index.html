@@ -243,9 +243,56 @@
       <li>No database, no daemon, no scheduler, no hosted service, nothing to transfer.</li>
     </ul>
     <blockquote><p><b>Handover preference: I would like Terminal 3 to take ownership and host it.</b>
-    It is MIT-licensed and the handover doc is written for exactly that. The only thing bound to me
-    is the recorded <code>contract_id</code>, which is documentation, not config. The demo endpoint is
-    disposable and should be deleted.</p></blockquote>
+    It is MIT-licensed and the handover doc is written for exactly that.</p></blockquote>
+
+    <h3>The handover package</h3>
+    <p class="sub">Everything needed to take ownership, in one place.</p>
+    <table>
+      <tr><th>Item</th><th>Where</th></tr>
+      <tr><td>Source, MIT licensed</td><td><a href="https://github.com/ExpertVagabond/t3n-verified-actions">github.com/ExpertVagabond/t3n-verified-actions</a></td></tr>
+      <tr><td>Contract</td><td><code>z:&lt;tid&gt;:verified-actions</code> &middot; testnet <code>contract_id 896</code> &middot; v0.1.6</td></tr>
+      <tr><td>Storage</td><td>one private tenant KV map, <code>z:&lt;tid&gt;:actions</code>, owned by the contract</td></tr>
+      <tr><td>Build</td><td><code>cargo build --target wasm32-wasip2 --release</code> &rarr; 243&nbsp;KB component</td></tr>
+      <tr><td>Deploy</td><td><code>./t3n deploy --allow-host &lt;host&gt;</code> &mdash; registers, creates/re-points the map ACL, issues the grant</td></tr>
+      <tr><td>Operations</td><td><a href="https://github.com/ExpertVagabond/t3n-verified-actions/blob/main/RUNBOOK.md">RUNBOOK.md</a> &mdash; deployed state, every status, seven failure modes with fixes</td></tr>
+      <tr><td>Onboarding</td><td><a href="https://github.com/ExpertVagabond/t3n-verified-actions/blob/main/HANDOVER.md">HANDOVER.md</a> &mdash; six-step day-one checklist, assumes no contact with me</td></tr>
+      <tr><td>Tests</td><td><code>cargo test</code> &mdash; 7 tests, ~0.1s, no TEE / node / credentials / network</td></tr>
+      <tr><td>Bug reproduction</td><td><a href="https://github.com/ExpertVagabond/t3n-sdk-manifest-bug">github.com/ExpertVagabond/t3n-sdk-manifest-bug</a></td></tr>
+      <tr><td>Delete on handover</td><td><code>demo-endpoint/</code> and <code>submission-site/</code> &mdash; both disposable, neither is the product</td></tr>
+    </table>
+    <p>Nothing is bound to me except the <code>contract_id</code> recorded in the runbook, which is
+    documentation rather than configuration. There is no account to transfer, no secret to rotate,
+    no domain to move.</p>
+
+    <h3>Why keep it running</h3>
+    <p><b>It is infrastructure, not a vertical demo.</b> A payroll agent serves payroll teams. This
+    serves <em>every</em> agent on T3N that performs a side effect. Any builder who needs to prove a
+    disbursement, webhook or provisioning call actually landed can call it instead of rebuilding the
+    discipline badly. That makes it a building block for the platform rather than one more app on it.</p>
+    <p><b>It makes a T3N differentiator legible.</b> <code>kv-store.set-claims-digest</code> anchors a
+    record in the transaction&rsquo;s Merkle leaf so a receipt can be checked offline. That is a genuine
+    advantage over running an agent on ordinary infrastructure, and it is hard to sell in the abstract.
+    &ldquo;Here is a receipt your auditor can verify without trusting the node&rdquo; is a concrete answer to
+    the question every enterprise buyer actually asks, and this contract is a working demonstration of it.</p>
+    <p><b>It is the compliance story, not the security story.</b> Most of this round answers
+    &ldquo;who is allowed to act.&rdquo; Procurement asks that once. Audit asks &ldquo;prove it happened&rdquo;
+    every quarter, forever. Terminal 3 currently has more of the first answer than the second.</p>
+    <p><b>Running it costs approximately nothing.</b> No database, no daemon, no scheduler, no hosted
+    service, no background process. It is invoked on demand and stores one small JSON record per action
+    with bodies excluded. The only recurring cost is per-invocation credits.</p>
+    <p><b>It is cheap to maintain because the risky part is isolated.</b> The state machine is pure and
+    covered by native tests that need no infrastructure to run; the host glue is the boring part. A
+    maintainer changing it gets a signal in a tenth of a second.</p>
+    <p><b>It already survived contact with reality.</b> Three platform bugs were found and worked around
+    while building it, and when my credits ran out mid-flow the design behaved exactly as intended: a
+    record stranded in <code>pending_verification</code> was neither lost nor falsely confirmed, and settled
+    correctly once credits returned.</p>
+
+    <figure>
+      <img src="img/09-recovery.png" alt="After a credit top-up, the stranded record settles to unverified and the ledger lists four records.">
+      <figcaption>An infrastructure failure mid-flow is not a correctness failure. The stranded record
+      waited in <code>pending_verification</code> &mdash; the honest state &mdash; and settled correctly afterwards.</figcaption>
+    </figure>
   </div>
 </section>
 
