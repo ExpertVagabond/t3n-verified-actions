@@ -19,6 +19,22 @@ const MAP_TAIL: &str = "actions";
 /// scan and rejects `limit == 0`, so callers page by passing the next `start`.
 const DEFAULT_SCAN_LIMIT: u32 = 100;
 
+/// Secondary index of every idempotency key, newline-separated.
+///
+/// A belt-and-braces fallback for `list-records`. `scan` is the primary path and
+/// its range and limit semantics are correct, but its VALUES are not usable (see
+/// `list_records`), so this index guarantees the ledger stays enumerable even if
+/// scan regresses further.
+///
+/// The `__` prefix keeps it out of the user key space; it is filtered from scan
+/// results so it can never be mistaken for a record.
+const INDEX_KEY: &str = "__index";
+
+/// Ceiling on indexed keys. The index is one value, so it is a write hotspot and
+/// grows unbounded without a bound. At this point `list-records` still works via
+/// the index for the first N keys and `get-record` keeps working for all of them.
+const INDEX_MAX: usize = 5000;
+
 fn map_name() -> String {
     format!("z:{}:{}", hex::encode(tenant_context::tenant_did()), MAP_TAIL)
 }
@@ -58,11 +74,59 @@ struct ListResponse {
     records: Vec<Record>,
     /// Set when the scan hit `limit`; pass it back as `start` for the next page.
     next_start: Option<String>,
+    /// Which read path produced these rows: `"scan"` (the host range scan) or
+    /// `"index"` (the fallback). Surfaced so an operator can see at a glance
+    /// whether the host-side scan bug is still in play.
+    source: &'static str,
+    /// Raw row count returned by `kv-store.scan` before filtering. Diagnostic:
+    /// distinguishes "scan returned nothing" from "scan returned rows we dropped".
+    scanned: usize,
+    /// Keys `scan` returned, for diagnosing range behaviour. Bounded.
+    scanned_keys: Vec<String>,
+    /// Byte length of each value `scan` returned, paired with `scanned_keys`.
+    /// Distinguishes "scan omits values" from "values are present but unparseable".
+    scanned_value_lens: Vec<usize>,
+    /// First bytes of the first non-index value scan returned, lossy-decoded.
+    scanned_value_head: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
 // Ledger access
 // ---------------------------------------------------------------------------
+
+/// Read the secondary index. A missing or unreadable index is treated as empty:
+/// the index is a convenience for listing, never the source of truth.
+fn index_load() -> Vec<String> {
+    match kv_store::get(&map_name(), INDEX_KEY.as_bytes()) {
+        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Append one key to the index. Best-effort: a failure here must not fail the
+/// action itself, because the record is already written and the index is only a
+/// listing aid. It is logged so an operator can see the index drifting.
+fn index_append(key: &str) {
+    let mut keys = index_load();
+    if keys.iter().any(|k| k == key) {
+        return;
+    }
+    if keys.len() >= INDEX_MAX {
+        let _ = logging::error(&format!(
+            "index full at {INDEX_MAX} keys; {key} written but not indexed (get-record still works)"
+        ));
+        return;
+    }
+    keys.push(key.to_string());
+    let joined = keys.join("\n");
+    if let Err(e) = kv_store::put(&map_name(), INDEX_KEY.as_bytes(), joined.as_bytes()) {
+        let _ = logging::error(&format!("index append failed for {key}: {e}"));
+    }
+}
 
 fn load(key: &str) -> Result<Option<Record>, String> {
     let raw = kv_store::get(&map_name(), key.as_bytes()).map_err(|e| format!("kv get: {e}"))?;
@@ -189,6 +253,7 @@ pub fn submit_action(input: &[u8]) -> Result<Vec<u8>, String> {
     );
 
     store(&record)?;
+    index_append(&record.idempotency_key);
     let _ = logging::info(&format!(
         "submit-action: {} -> {:?} (not yet verified)",
         record.idempotency_key, record.status
@@ -260,28 +325,78 @@ pub fn list_records(input: &[u8]) -> Result<Vec<u8>, String> {
     let start = req.start.unwrap_or_default();
     // 0xFF sorts after any printable key, making the default range "everything
     // from `start` onward" without the caller naming an upper bound.
-    let end = req.end.unwrap_or_else(|| "\u{00ff}".to_string());
+    let end = req.end.map(|e| e.into_bytes()).unwrap_or_else(|| alloc::vec![0xffu8]);
     let limit = req.limit.filter(|l| *l > 0).unwrap_or(DEFAULT_SCAN_LIMIT);
 
-    let rows = kv_store::scan(&map_name(), start.as_bytes(), end.as_bytes(), limit)
+    // Primary path. Range and limit are honoured correctly by the host; only the
+    // returned values are unusable, so we take the keys from here.
+    let rows = kv_store::scan(&map_name(), start.as_bytes(), &end, limit)
         .map_err(|e| format!("kv scan: {e}"))?;
 
-    let hit_limit = rows.len() as u32 == limit;
-    let mut records = Vec::with_capacity(rows.len());
-    let mut last_key = None;
-    for (key, value) in rows {
-        last_key = Some(String::from_utf8_lossy(&key).to_string());
-        match serde_json::from_slice::<Record>(&value) {
-            Ok(r) => records.push(r),
-            // One corrupt row must not blind an operator to the rest of the ledger.
+    let scanned = rows.len();
+    let scanned_keys: Vec<String> = rows
+        .iter()
+        .take(10)
+        .map(|(k, _)| String::from_utf8_lossy(k).to_string())
+        .collect();
+    let scanned_value_lens: Vec<usize> = rows.iter().take(10).map(|(_, v)| v.len()).collect();
+    let scanned_value_head: Option<String> = rows
+        .iter()
+        .find(|(k, _)| !String::from_utf8_lossy(k).starts_with("__"))
+        .map(|(_, v)| String::from_utf8_lossy(&v[..v.len().min(160)]).to_string());
+
+    // scan's KEYS are correct; its VALUES are not.
+    //
+    // Verified 2026-09-06 on testnet: a value above the storage inlining threshold
+    // comes back from `scan` as an unresolved storage envelope --
+    // `T3VR{"value_cid":[..32 bytes..],"size_bytes":1011,...}` -- rather than the
+    // stored bytes. `get` on the same key dereferences correctly. Small values
+    // (the 12-byte index here) come back intact, which is what makes this easy to
+    // miss in a smoke test.
+    //
+    // So: take the keys from scan and read each record through `get`. If the host
+    // starts dereferencing scan values, this path keeps working unchanged.
+    let mut keys: Vec<String> = rows
+        .iter()
+        .map(|(k, _)| String::from_utf8_lossy(k).to_string())
+        .filter(|k| !k.starts_with("__")) // internal bookkeeping, never a record
+        .collect();
+
+    let mut source = "scan+get";
+    if keys.is_empty() {
+        keys = index_load();
+        source = "index";
+    }
+
+    // Redundant when rows came from `scan` (the host already applied the bounds),
+    // but required for the index fallback, and harmless either way.
+    let end_str = String::from_utf8_lossy(&end).to_string();
+    keys.retain(|k| k.as_str() >= start.as_str() && k.as_str() < end_str.as_str());
+    keys.sort();
+
+    let hit_limit = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+
+    let mut records = Vec::with_capacity(keys.len());
+    for k in &keys {
+        match load(k) {
+            Ok(Some(r)) => records.push(r),
+            Ok(None) => {
+                let _ = logging::error(&format!("list-records: key {k} has no record"));
+            }
             Err(e) => {
-                let _ = logging::error(&format!(
-                    "list-records: skipping corrupt entry {}: {e}",
-                    last_key.as_deref().unwrap_or("?")
-                ));
+                let _ = logging::error(&format!("list-records: {k}: {e}"));
             }
         }
     }
 
-    json_out(&ListResponse { records, next_start: if hit_limit { last_key } else { None } })
+    json_out(&ListResponse {
+        records,
+        next_start: if hit_limit { keys.last().cloned() } else { None },
+        source,
+        scanned,
+        scanned_keys,
+        scanned_value_lens,
+        scanned_value_head,
+    })
 }

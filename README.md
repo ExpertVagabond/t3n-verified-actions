@@ -83,20 +83,20 @@ happened. That exact scenario is covered by a unit test
 
 ## Proven end-to-end on testnet
 
-Registered as `contract_id 890` on T3N testnet and run against a deliberately
+Registered as `contract_id 896` (v0.1.6) on T3N testnet and run against a deliberately
 unreliable endpoint (`demo-endpoint/`) whose `POST /notify` **always** returns 200
 while `GET /deliveries` reports what actually happened.
 
 ```
-$ npm run t3n -- submit example-action-lying.json
+$ ./t3n submit example-action-lying.json
   status=pending_verification  effect_code=200  verify_attempts=0
   reason: transport accepted the request; not yet independently verified
 
-$ npm run t3n -- verify demo-lying-001
+$ ./t3n verify demo-lying-001
   status=unverified  effect_code=200  verify_attempts=1
   reason: expected response to contain "\"state\": \"delivered\""
 
-$ npm run t3n -- submit example-action-lying.json     # same key, again
+$ ./t3n submit example-action-lying.json     # same key, again
   status=unverified  effect_code=200  verify_attempts=1
   reason: expected response to contain "\"state\": \"delivered\""
 ```
@@ -137,17 +137,18 @@ cp ops/.env.example ops/.env                   # add your T3N_API_KEY
 cd ops && npm install
 
 # 3. Deploy and operate
-npm run t3n -- doctor
-npm run t3n -- deploy --allow-host api.example.com
-npm run t3n -- submit example-action.json
-npm run t3n -- verify demo-honest-001
-npm run t3n -- list
+./t3n doctor
+./t3n deploy --allow-host api.example.com
+./t3n submit example-action.json
+./t3n verify demo-honest-001
+./t3n list
 ```
 
 > **Pin `@terminal3/t3n-sdk@5.2.0`.** Versions >= 5.3.0 cannot reach testnet at all —
 > they reject the trust manifest before authentication is attempted. Root cause,
 > bisect and reproduction: [`t3n-sdk-manifest-bug`](https://github.com/ExpertVagabond/t3n-sdk-manifest-bug).
-> `npm run t3n -- doctor` fails loudly if the pin has drifted.
+> `./t3n doctor` fails loudly if the pin has drifted. Terminal 3 DevRel confirmed the
+> pin on 2026-09-07: *"yes please use sdkv5.2 for this challenge"*.
 
 ## Operating it
 

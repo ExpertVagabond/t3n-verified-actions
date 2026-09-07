@@ -22,13 +22,19 @@ import {
 // Relative to ops/src/, so two levels up to the crate root.
 const WASM = "../../target/wasm32-wasip2/release/z_verified_actions.wasm";
 
+// Arguments as the shell saw them, snapshotted by ./t3n before any import ran.
+// Falls back to process.argv when the CLI is invoked directly.
+const ARGV: string[] = process.env.T3N_ARGV
+  ? process.env.T3N_ARGV.split(" ").filter((s) => s.length > 0)
+  : process.argv.slice(2);
+
 function arg(flag: string): string | undefined {
-  const i = process.argv.indexOf(flag);
-  return i === -1 ? undefined : process.argv[i + 1];
+  const i = ARGV.indexOf(flag);
+  return i === -1 ? undefined : ARGV[i + 1];
 }
 function args(flag: string): string[] {
-  return process.argv.reduce<string[]>(
-    (acc, v, i) => (v === flag && process.argv[i + 1] ? [...acc, process.argv[i + 1]] : acc),
+  return ARGV.reduce<string[]>(
+    (acc, v, i) => (v === flag && ARGV[i + 1] ? [...acc, ARGV[i + 1]] : acc),
     [],
   );
 }
@@ -102,18 +108,37 @@ async function deploy() {
 
   // readers must be explicit: the KV governor defaults to deny, and omitting it
   // fails at runtime with AccessDenied rather than here.
+  const acl = {
+    visibility: "private" as const,
+    writers: { only: [contract_id] },
+    readers: { only: [contract_id] },
+  };
   try {
-    await tenant.maps.create({
-      tail: MAP_TAIL,
-      visibility: "private",
-      writers: { only: [contract_id] },
-      readers: { only: [contract_id] },
-    });
+    await tenant.maps.create({ tail: MAP_TAIL, ...acl });
     console.log(`map         z:<tid>:${MAP_TAIL} created`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes("MapAlreadyExists")) throw e;
-    console.log(`map         z:<tid>:${MAP_TAIL} already exists (ok)`);
+    // The server has used both "MapAlreadyExists" and "map already exists".
+    if (!/map\s*already\s*exists/i.test(msg)) throw e;
+    // The map outlives the contract, but its ACL is scoped by contract_id and a
+    // re-register just allocated a new one. Without this the contract silently
+    // loses access to its own ledger and every call fails with AccessDenied.
+    console.log(`map         z:<tid>:${MAP_TAIL} exists; re-pointing ACL at ${contract_id}`);
+    try {
+      // NOTE: maps.create takes an object containing `tail`, but maps.update,
+      // maps.getStatus and maps.entryGet take the tail POSITIONALLY. Passing the
+      // object form here fails with a confusing "Tenant name tail must match"
+      // regex error, because the object lands in the tail slot.
+      await tenant.maps.update(MAP_TAIL, acl);
+      console.log(`map ACL     updated -> contract ${contract_id}`);
+    } catch (e2) {
+      const m2 = e2 instanceof Error ? e2.message : String(e2);
+      console.error(
+        `\nWARNING: could not update the map ACL (${m2}).\n` +
+          `The contract will fail with AccessDenied until the 'actions' map grants\n` +
+          `read+write to contract ${contract_id}.`,
+      );
+    }
   }
 
   // Self-grant: tenant, agent and user are the same DID here, which is what lets
@@ -145,11 +170,14 @@ async function deploy() {
 }
 
 async function call(fn: string, input: unknown) {
+  if (process.env.T3N_DEBUG_ARGV) console.error("input:", JSON.stringify(input));
   const { client, tenantDid } = await connectTenant();
   const script = scriptName(tenantDid);
+  const ver = await currentVersion(script);
+  if (process.env.T3N_DEBUG_ARGV) console.error("resolved contract_version:", ver);
   return client.executeAndDecode({
     contract_id: script,
-    contract_version: await currentVersion(script),
+    contract_version: ver,
     function_name: fn,
     input,
   });
@@ -169,23 +197,44 @@ function show(record: any) {
 }
 
 async function main() {
-  const cmd = process.argv[2];
+  if (process.env.T3N_DEBUG_ARGV) {
+    console.error("argv:", JSON.stringify(process.argv.slice(1)));
+    console.error("arg(--limit)=", JSON.stringify(arg("--limit")), "arg(--start)=", JSON.stringify(arg("--start")));
+  }
+  const cmd = ARGV[0];
   switch (cmd) {
     case "doctor":
       return doctor();
     case "deploy":
       return deploy();
     case "submit": {
-      const path = process.argv[3];
+      const path = ARGV[1];
       if (!path) throw new Error("usage: submit <spec.json>");
       return show(await call("submit-action", JSON.parse(await readFile(path, "utf8"))));
     }
     case "verify":
-      return show(await call("verify-action", { idempotency_key: process.argv[3] }));
+      return show(await call("verify-action", { idempotency_key: ARGV[1] }));
     case "get":
-      return show(await call("get-record", { idempotency_key: process.argv[3] }));
-    case "list":
-      return show(await call("list-records", { limit: Number(arg("--limit") ?? 100) }));
+      return show(await call("get-record", { idempotency_key: ARGV[1] }));
+    case "list": {
+      const input = {
+        limit: Number(arg("--limit") ?? 100),
+        ...(arg("--start") !== undefined ? { start: arg("--start") } : {}),
+        ...(arg("--end") !== undefined ? { end: arg("--end") } : {}),
+      };
+      // Printed unconditionally. Flag parsing has been observed to silently fall
+      // back to defaults in some shells, and a listing that quietly ignores
+      // --limit is exactly the kind of unverified answer this project exists to
+      // refuse. If this line does not match what you typed, the flags did not
+      // take -- pass the payload directly instead.
+      console.error(`requested: ${JSON.stringify(input)}`);
+      const res: any = await call("list-records", input);
+      console.error(
+        `returned : ${res.records?.length ?? 0} records via ${res.source} ` +
+          `(scan saw ${res.scanned})`,
+      );
+      return show(res);
+    }
     default:
       console.log(readFileSync(new URL("./cli.ts", import.meta.url), "utf8").split("\n").slice(1, 9).join("\n").replace(/^\/\/ ?/gm, ""));
       process.exit(cmd ? 1 : 0);

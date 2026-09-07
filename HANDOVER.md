@@ -15,12 +15,12 @@ that the contract itself owns.
 1. **Claim your own credential** at <https://go.terminal3.io/adk-community>. Put it in
    `ops/.env`. Nothing in this repo is bound to the original author's DID except the
    recorded values in [RUNBOOK.md](RUNBOOK.md), which are documentation, not config.
-2. `cd ops && npm install && npm run t3n -- doctor`. It should print your DID and
+2. `cd ops && npm install && ./t3n doctor`. It should print your DID and
    report the contract as unregistered.
 3. `cargo test` — 7 tests, ~0.1s, no network or credentials. If these pass, the state
    machine is intact.
 4. `cargo build --target wasm32-wasip2 --release`
-5. `npm run t3n -- deploy --allow-host <a host you control>`
+5. `./t3n deploy --allow-host <a host you control>`
 6. Record the printed `contract_id` in RUNBOOK.md.
 
 That is the whole onboarding. There is no step 7.
@@ -47,6 +47,10 @@ has the right shape — change `agentDid: tenantDid` to the real agent's DID.
 **Decide who may submit.** Right now any caller holding a valid grant may write to the
 ledger. If actions carry financial weight, gate `submit-action` on
 `tenant_context::calling_user_did()` against an allowlist map.
+
+**Never invoke the CLI through `npm run`.** Use `./t3n`. It snapshots argv in the
+shell because the SDK's WASI init clobbers `process.argv`, and it disables the tsx
+compile cache. Both have silently produced wrong results.
 
 **Add a verification scheduler.** Nothing currently walks `pending_verification`
 records and calls `verify-action` on them. `list-records` pages the ledger and
@@ -90,7 +94,8 @@ likely to need editing and the least likely to be subtly wrong.
 before authentication, because `isSignedTrustManifest` requires an `rtmr1_allowlist`
 field the testnet manifest does not publish. **The pin to 5.2.0 in `ops/package.json`
 is deliberate. Do not bump it until the manifest publishes that field.**
-`npm run t3n -- doctor` fails loudly if it drifts. Full root cause, version bisect and
+`./t3n doctor` fails loudly if it drifts. Terminal 3 DevRel confirmed this pin
+directly on 2026-09-07: *"yes please use sdkv5.2 for this challenge"*. Full root cause, version bisect and
 a runnable reproduction: [`t3n-sdk-manifest-bug`](https://github.com/ExpertVagabond/t3n-sdk-manifest-bug).
 
 ## Licence

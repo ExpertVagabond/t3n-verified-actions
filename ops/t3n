@@ -1,0 +1,12 @@
+#!/bin/sh
+# Direct entrypoint for the ops CLI.
+#
+# T3N_ARGV snapshots the arguments in the shell, before any JavaScript runs. The
+# SDK initialises a WASI shim at import time, and process.argv has been observed
+# to lose the trailing flags by the time main() reads it -- which silently turned
+# `list --limit 1` into the default limit of 100. Reading the snapshot removes
+# any dependency on argv surviving module initialisation.
+#
+# TSX_DISABLE_CACHE stops tsx serving a stale compile of cli.ts.
+cd "$(dirname "$0")" || exit 1
+T3N_ARGV="$*" TSX_DISABLE_CACHE=1 exec npx tsx src/cli.ts "$@"

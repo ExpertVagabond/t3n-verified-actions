@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Deploy and operate the z-verified-actions TEE contract",
   "scripts": {
-    "t3n": "tsx src/cli.ts"
+    "t3n": "./t3n"
   },
   "dependencies": {
     "@terminal3/t3n-sdk": "5.2.0",
