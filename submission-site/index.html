@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>z-verified-actions — T3N Agent Build Challenge submission</title>
+<meta name="description" content="A Terminal 3 TEE contract that will not report an action as succeeded until it has independently verified it.">
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#141721; --panel2:#1a1e2b; --line:#242a3a;
+    --fg:#e6e9f0; --muted:#98a1b5; --dim:#6b7386;
+    --accent:#8ab4ff; --good:#63d68b; --warn:#ffc861; --bad:#ff6b6b;
+    --maxw:860px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  header{padding:72px 0 44px;border-bottom:1px solid var(--line)}
+  .eyebrow{color:var(--accent);font-size:13px;letter-spacing:.14em;text-transform:uppercase;
+    font-weight:600;margin:0 0 16px}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.12;margin:0 0 18px;letter-spacing:-.02em}
+  .lede{font-size:clamp(17px,2.4vw,20px);color:var(--muted);margin:0 0 26px;max-width:62ch}
+  .rule{font-size:clamp(19px,2.8vw,23px);font-weight:600;color:var(--fg);
+    border-left:3px solid var(--accent);padding:4px 0 4px 18px;margin:0 0 28px}
+  .meta{display:flex;flex-wrap:wrap;gap:10px}
+  .pill{display:inline-block;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:6px 14px;font-size:13px;color:var(--muted)}
+  .pill b{color:var(--fg);font-weight:600}
+  .links{display:flex;flex-wrap:wrap;gap:12px;margin-top:26px}
+  .btn{display:inline-block;padding:11px 18px;border-radius:9px;text-decoration:none;
+    font-size:15px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+  .btn.primary{background:var(--accent);color:#0d0f14;border-color:var(--accent)}
+  .btn:hover{border-color:var(--accent)}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:26px;margin:0 0 8px;letter-spacing:-.01em}
+  h3{font-size:18px;margin:34px 0 8px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+  p{margin:0 0 16px;max-width:68ch}
+  .muted{color:var(--muted)}
+  a{color:var(--accent)}
+
+  figure{margin:26px 0}
+  figure img{width:100%;height:auto;display:block;border-radius:10px;border:1px solid var(--line)}
+  figcaption{color:var(--dim);font-size:13.5px;margin-top:10px}
+
+  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:15px;display:block;overflow-x:auto}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+  td code{font-size:13.5px;color:var(--fg)}
+
+  .flow{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px;overflow-x:auto;margin:24px 0}
+  .flow pre{margin:0;font-size:13.5px;line-height:1.6;color:var(--muted);white-space:pre}
+
+  .finding{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
+    border-radius:10px;padding:20px 22px;margin:18px 0}
+  .finding.crit{border-left-color:var(--bad)}
+  .finding.high{border-left-color:var(--warn)}
+  .finding h3{margin:0 0 10px;font-size:17px}
+  .finding p:last-child{margin-bottom:0}
+  .tag{display:inline-block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    font-weight:700;padding:3px 8px;border-radius:5px;margin-right:9px;vertical-align:2px}
+  .tag.crit{background:rgba(255,107,107,.15);color:var(--bad)}
+  .tag.high{background:rgba(255,200,97,.15);color:var(--warn)}
+  .tag.med{background:rgba(138,180,255,.13);color:var(--accent)}
+
+  pre.code{background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+    padding:16px 18px;overflow-x:auto;font-size:13.5px;line-height:1.6;color:var(--muted);margin:16px 0}
+  .good{color:var(--good)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  blockquote{margin:18px 0;padding:14px 20px;background:var(--panel);
+    border-left:3px solid var(--good);border-radius:0 8px 8px 0;color:var(--fg)}
+  blockquote p{margin:0}
+  footer{padding:44px 0 72px;color:var(--dim);font-size:14px}
+  ul{max-width:68ch;padding-left:22px} li{margin-bottom:9px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">T3N Agent Build Challenge · Submission</p>
+    <h1>An enterprise agent that won&rsquo;t tell you an action succeeded until it has checked.</h1>
+    <p class="rule">A 2xx response is not evidence that an action happened.</p>
+    <p class="lede">
+      <code>z-verified-actions</code> is a Terminal 3 TEE contract for enterprises that perform
+      consequential side effects &mdash; disbursements, webhooks, provisioning, notifications &mdash;
+      and need to prove what actually happened, months later, to someone who does not trust them.
+    </p>
+    <div class="meta">
+      <span class="pill">Matthew Karsten</span>
+      <span class="pill">DID <b>did:t3n:9946&hellip;2902</b></span>
+      <span class="pill">testnet <b>contract_id 896</b></span>
+      <span class="pill">v0.1.6</span>
+      <span class="pill">MIT</span>
+    </div>
+    <div class="links">
+      <a class="btn primary" href="https://github.com/ExpertVagabond/t3n-verified-actions">Agent repo</a>
+      <a class="btn" href="https://github.com/ExpertVagabond/t3n-sdk-manifest-bug">Bug reproduction</a>
+      <a class="btn" href="#findings">9 findings</a>
+      <a class="btn" href="#handover">Handover</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The demo</h2>
+    <p class="sub">Real output, captured against T3N testnet. The endpoint always returns 200 and never delivers.</p>
+    <figure>
+      <img src="img/demo.gif" alt="Terminal replay: a webhook returns 200, the contract records pending_verification, an independent read-back marks it unverified, and replaying the same idempotency key makes no second call.">
+      <figcaption>The transport said 200. The contract refused to agree, checked, and caught it.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p>Transports lie. A mail API returns 200 and saves a draft. A webhook returns 202 and drops
+    the job. A retry double-charges because the first attempt was recorded as failed when it had
+    actually succeeded. An agent that reports success from a status code will eventually report
+    something that did not happen &mdash; and in an enterprise, that is the failure that costs money
+    and trust.</p>
+    <p>So the contract splits every side effect into two phases that cannot be collapsed:</p>
+    <table>
+      <tr><th>Function</th><th>Guarantee</th></tr>
+      <tr><td><code>submit-action</code></td><td>Performs the effect <b>at most once</b> per idempotency key. Can only ever produce <code>pending_verification</code>. <b>There is no input that makes it return <code>confirmed</code>.</b></td></tr>
+      <tr><td><code>verify-action</code></td><td>Issues a <b>different</b> request that reads back the state the effect was supposed to change. This is the only transition into <code>confirmed</code>.</td></tr>
+      <tr><td><code>get-record</code> / <code>list-records</code></td><td>Read the append-only ledger.</td></tr>
+    </table>
+    <div class="flow"><pre>                          transport errored
+     submit-action ─────────────────────────►  failed        (safe to resubmit)
+          │
+          │ transport accepted
+          ▼
+   pending_verification
+          │
+          │ verify-action  (an INDEPENDENT read-back)
+          ├─────────── expectation met ─────►  confirmed
+          └─────────── expectation missed ──►  unverified    (do NOT auto-retry)</pre></div>
+    <p><code>unverified</code> is deliberately terminal. An action that may have half-succeeded is the
+    single most dangerous thing to retry automatically, so the contract escalates to a human
+    instead of guessing.</p>
+    <p>Every write anchors a SHA-256 of the record in the transaction&rsquo;s Merkle leaf via
+    <code>kv-store.set-claims-digest</code>, so an auditor can verify a receipt <b>offline</b>, without
+    trusting the node that served it.</p>
+
+    <h3>The expectation model</h3>
+    <pre class="code">"expect": {
+  "status": 200,
+  "body_contains": ["INV-1042", "\"state\":\"delivered\""],
+  "body_absent":   ["\"state\":\"queued\"", "\"state\":\"failed\""]
+}</pre>
+    <p><code>body_absent</code> is not decoration. The case that motivated it: a mail transport reported
+    success and the message did exist &mdash; flagged as an auto-saved draft rather than a sent
+    message. Presence alone would have confirmed a send that never happened. That exact scenario
+    is covered by a unit test, <code>presence_of_a_draft_marker_blocks_confirmation</code>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why this, and not another credential vault</h2>
+    <p>The obvious enterprise agent on a TEE is a sealed-credential demo. Before choosing a
+    direction I read what had already been built for this round: of the public repos importing
+    <code>@terminal3/t3n-sdk</code> created since the challenge opened, roughly half are variations
+    on sealed credentials and access gating.</p>
+    <p>That work answers <em>&ldquo;who is allowed to act.&rdquo;</em> It does not answer
+    <em>&ldquo;did the act happen.&rdquo;</em> The second question is where agent deployments
+    actually break: an agent reports a disbursement it never made, a retry sends the same invoice
+    twice, and an audit six months later turns up nothing but a log line reading <code>200 OK</code>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Proven end to end</h2>
+    <p class="sub">Registered on T3N testnet as contract_id 896. Every image below is a live run.</p>
+
+    <figure>
+      <img src="img/04-lying-transport.png" alt="Submit records pending_verification against a 200 response; verify marks it unverified; replaying the same key makes no second outbound call.">
+      <figcaption><b>The core result.</b> The transport returned 200. The contract recorded
+      <span class="warn">pending_verification</span>, the independent read-back returned
+      <span class="bad">unverified</span> naming the exact clause that failed, and replaying the
+      same idempotency key returned the stored record with no second outbound call.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="img/07-happy-path.png" alt="The honest path reaches confirmed, and the ledger lists three records.">
+      <figcaption>The honest path reaches <span class="good">confirmed</span> &mdash;
+      &ldquo;independently verified against external state&rdquo; &mdash; and the ledger lists every record.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="img/08-deploy.png" alt="Deploy registers the contract, re-points the map ACL and issues a self-grant.">
+      <figcaption>One idempotent command registers the contract, re-points the map ACL at the new
+      <code>contract_id</code>, and issues the egress grant.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="img/01-tests.png" alt="cargo test: 7 passed, 0 failed.">
+      <figcaption>The state machine is pure and native-testable &mdash; no TEE, node, credentials or
+      network required. This is the part most likely to be wrong, so it is the part under test.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="img/02-component.png" alt="wasm-tools shows the component exporting z:verified-actions/contracts and importing four host interfaces.">
+      <figcaption>The built component exports <code>z:verified-actions/contracts@0.1.0</code> and imports
+      exactly the four host interfaces declared in <code>wit/world.wit</code> &mdash; an import list identical
+      to the official <code>z-tenant-flight</code> reference contract.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="img/03-doctor.png" alt="./t3n doctor reports SDK version, key, DID match, tenant admission and registered version.">
+      <figcaption><code>doctor</code> is a real preflight: SDK pin, key, DID match, tenant admission,
+      registered version. Every failure prints the command that fixes it.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="handover">
+  <div class="wrap">
+    <h2>Maintainability and handover</h2>
+    <p>This is what I optimised for, since the brief weights it heavily.</p>
+    <ul>
+      <li><b>The risky logic is isolated and natively testable.</b> <code>src/record.rs</code> is pure &mdash;
+      no host calls, no I/O &mdash; so 7 unit tests cover the state machine in ~0.1s with no credentials.</li>
+      <li><b>One CLI for the whole lifecycle</b>, every command idempotent. Re-running after a partial
+      failure is always safe.</li>
+      <li><b><code>list</code> reports the parameters it actually sent.</b> A listing that quietly ignored
+      <code>--limit</code> would be exactly the unverified answer this project exists to refuse.</li>
+      <li><b><code>deploy</code> re-points the map ACL</b> on every re-registration, closing the
+      <code>AccessDenied</code> trap the docs warn about.</li>
+      <li><b>A runbook and a handover doc</b> written for someone with no contact with me: deployed
+      state, every status and what to do about it, the failure modes I actually hit, and the design
+      decisions worth revisiting.</li>
+      <li>No database, no daemon, no scheduler, no hosted service, nothing to transfer.</li>
+    </ul>
+    <blockquote><p><b>Handover preference: I would like Terminal 3 to take ownership and host it.</b>
+    It is MIT-licensed and the handover doc is written for exactly that. The only thing bound to me
+    is the recorded <code>contract_id</code>, which is documentation, not config. The demo endpoint is
+    disposable and should be deleted.</p></blockquote>
+  </div>
+</section>
+
+<section id="findings">
+  <div class="wrap">
+    <h2>Bugs and docs gaps</h2>
+    <p class="sub">Nine findings. Every one reproduced before it was written down.</p>
+
+    <div class="finding crit">
+      <h3><span class="tag crit">Critical</span>The published quickstart is broken for every new developer</h3>
+      <p><code>@terminal3/t3n-sdk</code> &ge; 5.3.0 <b>cannot reach testnet at all</b>.
+      <code>fetchTrustedManifest("testnet")</code> throws <code>Trust manifest &hellip; is malformed</code>
+      <em>before authentication is attempted</em>, so it presents as a credential problem when it is not.</p>
+      <p><b>Root cause:</b> <code>isSignedTrustManifest</code> requires an <code>rtmr1_allowlist</code> array.
+      The endpoint returns HTTP 200 and valid JSON but publishes only <code>cluster, version, peer_ids,
+      rtmr3_allowlist, signed_at, signature</code>. One missing field fails the whole validation.</p>
+      <p><b>Bisected:</b> 5.2.0 OK, <b>5.3.0 FAIL</b> (shipped 2026-08-28). <code>latest</code> is 5.10.0, so a
+      plain <code>npm install</code> per the published quickstart is dead on arrival. It cannot be patched
+      client-side: <code>signature</code> covers the canonicalised payload, so injecting the field breaks
+      signature verification.</p>
+      <blockquote><p>Reported to Ian Chong (DevRel Lead) 2026-09-06. Reply 2026-09-07:
+      <em>&ldquo;Thank for the heads up and yes please use sdkv5.2 for this challenge.&rdquo;</em>
+      The pin here is the sanctioned configuration.</p></blockquote>
+      <figure>
+        <img src="img/05-sdk-bug.png" alt="npm run repro shows the manifest is valid JSON but rtmr1_allowlist is absent, and the SDK rejects it.">
+        <figcaption>Reproduced with no credentials at all.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/06-decode.png" alt="The decoder recovers the required field names from the obfuscated bundle and diffs them against what the server serves.">
+        <figcaption>The bundle ships obfuscated with a rotated string table, so the field names are not
+        greppable. Rather than reimplement the deobfuscator, the script lets the bundle decode itself
+        and diffs required against served. Result: <code>MISSING: rtmr1_allowlist</code>.</figcaption>
+      </figure>
+    </div>
+
+    <div class="finding high">
+      <h3><span class="tag high">High</span><code>kv-store.scan</code> returns unresolved storage envelopes instead of values</h3>
+      <p>A value above the storage inlining threshold comes back from <code>scan</code> as an internal
+      reference envelope rather than the stored bytes:</p>
+      <pre class="code">T3VR{"value_cid":[101,139,85,123,&hellip;32 bytes&hellip;],"size_bytes":1011,"storage_lo&hellip;</pre>
+      <p><code>get</code> on the exact same key dereferences correctly. So a contract that writes with
+      <code>put</code> and reads with <code>get</code> works perfectly, while the same record read through
+      <code>scan</code> is unparseable.</p>
+      <p><b>What makes this genuinely dangerous: small values come back intact.</b> A 12-byte key
+      returned fine while three ~1&nbsp;KB records returned envelopes, so a smoke test on small values
+      passes and the bug only appears at realistic payload sizes.</p>
+      <p class="muted">To be clear about what is <em>not</em> broken: <code>scan</code>&rsquo;s range and limit
+      semantics are correct. I initially believed they were ignored and that was wrong &mdash; it was
+      caused by the <code>process.argv</code> issue below, which meant my parameters never reached the
+      contract. Verified after fixing: <code>[a,d)</code> returns 0, <code>[a,demo-m)</code> returns 2,
+      <code>start=z</code> returns 0.</p>
+    </div>
+
+    <div class="finding high">
+      <h3><span class="tag high">High</span>The SDK clobbers <code>process.argv</code> at import time</h3>
+      <p>Importing <code>@terminal3/t3n-sdk</code> initialises a WASI shim, and trailing command-line flags
+      are gone from <code>process.argv</code> by the time application code reads them. A CLI that parses
+      <code>process.argv</code> after importing the SDK silently falls back to its defaults &mdash; in my case
+      <code>--limit 1</code> arrived at the contract as <code>100</code>, producing a wrong answer with no error.</p>
+      <p>Nasty because it is silent and looks intermittent. Anyone building a CLI on this SDK will hit
+      it. Workaround: snapshot the arguments in the shell before Node starts.</p>
+    </div>
+
+    <div class="finding">
+      <h3><span class="tag med">Medium</span>SDK errors print ~1.6&nbsp;MB of obfuscated bundle</h3>
+      <p>A rejection inside <code>fetchTrustedManifest</code> puts the entire minified
+      <code>index.esm.js</code> in the stack trace, burying the actual message. Truncating the frame, or
+      catching and rethrowing a clean error, would make every SDK failure dramatically easier to diagnose.</p>
+    </div>
+
+    <div class="finding">
+      <h3><span class="tag med">Medium</span>The package <code>exports</code> map blocks deep imports</h3>
+      <p><code>exports</code> declares only <code>"."</code> and <code>"./wasm/generated/session.js"</code>. Node treats
+      that as an allowlist, so <code>require("@terminal3/t3n-sdk/package.json")</code> &mdash; the ordinary way to
+      report which version you are on &mdash; fails with <code>ERR_PACKAGE_PATH_NOT_EXPORTED</code>. Adding
+      <code>"./package.json"</code> would cost nothing.</p>
+    </div>
+
+    <div class="finding">
+      <h3><span class="tag med">Medium</span>The quickstart does not warn you will need three credentials</h3>
+      <p>The walkthrough reads as one linear flow, but step 4 needs <b>three separate credentials</b> &mdash;
+      tenant, agent and user &mdash; each with its own DID and its own credit balance. The claim page is
+      Google-SSO-only, so obtaining several is not obvious; a builder asked about exactly this in the
+      listing comments on 1 September.</p>
+      <p>What rescued it is a single sentence buried in step 4: for a <b>direct (self) call</b> you may set
+      <code>agentDid</code> to your own DID. That self-grant is what let me run the whole flow on one
+      credential, and it deserves to be in the prerequisites as
+      &ldquo;you can complete the entire walkthrough with one key; here is how.&rdquo;</p>
+    </div>
+
+    <div class="finding">
+      <h3><span class="tag med">Medium</span><code>maps.create</code> and <code>maps.update</code> disagree on how to pass the tail</h3>
+      <p><code>maps.create({ tail, visibility, writers, readers })</code> takes the tail inside the object.
+      <code>maps.update</code>, <code>maps.getStatus</code> and <code>maps.entryGet</code> take it <b>positionally</b>.
+      Passing the object form to <code>update</code> fails with
+      <code>Tenant name tail must match /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,127}$/</code> &mdash; an error that points
+      at your tail name when the tail name is fine.</p>
+    </div>
+
+    <div class="finding">
+      <h3><span class="tag med">Low</span><code>contract_id</code> is unrecoverable after re-registration</h3>
+      <p>Re-registering a tail allocates a new <code>contract_id</code>, and map ACLs are scoped by it, so a
+      re-registration silently orphans them and reads then fail with <code>AccessDenied</code>. I confirmed
+      <code>contracts.listDetailed()</code> exists but returns only <code>name</code>, <code>short_name</code>,
+      <code>version</code>, <code>status</code> and <code>descriptor</code> &mdash; no id. Adding the id there would
+      remove a whole class of confusing failure.</p>
+    </div>
+
+    <div class="finding high">
+      <h3><span class="tag high">High</span>Test credits are exhausted far faster than advertised</h3>
+      <p>The ADK page offers <em>&ldquo;20,000 test credits &mdash; enough for 25 agents and ~5,000 protected
+      actions.&rdquo;</em> My allocation reached zero after <b>7 contract registrations and roughly 25
+      invocations</b>.</p>
+      <pre class="code">InsufficientCredit (account=9946&hellip;2902, required=10000000000, available=0)</pre>
+      <p>Two observations. Authentication and <code>handshake</code> still succeed, so the failure only appears
+      once you try to do work &mdash; including read-only calls like <code>get-record</code>, which makes a dead
+      allocation look like a broken contract. And each <code>deploy</code> is a registration, so ordinary
+      debugging burns the budget quickly. Signposting per-operation cost, or making registration cheap
+      relative to invocation, would make the sandbox go much further.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Verify it yourself</h2>
+    <p>The agent, with no credentials needed for the tests:</p>
+    <pre class="code">git clone https://github.com/ExpertVagabond/t3n-verified-actions
+cd t3n-verified-actions
+cargo test                                      <span class="good"># 7 passed</span>
+rustup target add wasm32-wasip2
+cargo build --target wasm32-wasip2 --release
+wasm-tools component wit target/wasm32-wasip2/release/z_verified_actions.wasm</pre>
+    <p>The SDK bug, in about thirty seconds, also with no credentials:</p>
+    <pre class="code">git clone https://github.com/ExpertVagabond/t3n-sdk-manifest-bug
+cd t3n-sdk-manifest-bug &amp;&amp; npm install
+npm run repro     <span class="bad"># fails on 5.10.0</span>
+npm run decode    <span class="warn"># prints the field the validator wants and the server omits</span>
+npm run bisect    <span class="muted"># the full version matrix</span></pre>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Matthew Karsten &middot; <code>did:t3n:99466752729636dd5f033007a5517924fd792902</code><br>
+    Submitted to the Terminal 3 Agent Build Challenge, September 2026. MIT licensed.</p>
+  </div>
+</footer>
+
+</body>
+</html>
