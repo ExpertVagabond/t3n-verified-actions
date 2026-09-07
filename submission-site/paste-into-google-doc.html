@@ -1,0 +1,289 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>T3N Submission — copy into Google Docs</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5;color:#111;
+    max-width:720px;margin:36px auto;padding:0 20px}
+  h1{font-size:20pt;margin:0 0 4px} h2{font-size:14pt;margin:26px 0 6px}
+  h3{font-size:12pt;margin:18px 0 4px}
+  table{border-collapse:collapse;width:100%;margin:12px 0}
+  th,td{border:1px solid #ccc;padding:7px 9px;text-align:left;vertical-align:top;font-size:10.5pt}
+  th{background:#f2f2f2}
+  code{font-family:"Courier New",monospace;font-size:10pt;background:#f5f5f5;padding:1px 3px}
+  pre{font-family:"Courier New",monospace;font-size:9.5pt;background:#f5f5f5;padding:10px;
+    border:1px solid #ddd;white-space:pre-wrap}
+  .todo{border:2px solid #d93025;background:#fdecea;padding:14px 18px;margin:0 0 26px}
+  .todo h3{margin-top:0;color:#d93025}
+  .shot{border:1px dashed #999;background:#fafafa;padding:10px 14px;margin:12px 0;font-size:10pt;color:#555}
+  blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid #999;background:#f7f7f7}
+</style>
+
+<div class="todo">
+  <h3>Before submitting — do these four things, then delete this box</h3>
+  <ol>
+    <li><b>Select all of this page in the browser, copy, paste into a new Google Doc.</b> Formatting survives.</li>
+    <li>Insert the 9 screenshots where each <i>[SCREENSHOT]</i> marker appears. They are listed with
+        direct links; right-click &rarr; save, then Insert &rarr; Image in Docs.</li>
+    <li><b>Share &rarr; General access &rarr; Anyone with the link &rarr; Viewer.</b> Without this the judges cannot open it.</li>
+    <li>Paste the Doc link into the Superteam listing and submit (costs 1 credit).</li>
+  </ol>
+</div>
+
+<h1>z-verified-actions</h1>
+<p><b>An enterprise agent that won&rsquo;t tell you an action succeeded until it has checked.</b></p>
+
+<table>
+  <tr><th>Built by</th><td>Matthew Karsten</td></tr>
+  <tr><th>Tenant DID</th><td><code>did:t3n:99466752729636dd5f033007a5517924fd792902</code></td></tr>
+  <tr><th>Live demo (click a button, no install)</th><td><b>https://t3n-verified-actions.pages.dev</b></td></tr>
+  <tr><th>Agent repository</th><td>https://github.com/ExpertVagabond/t3n-verified-actions</td></tr>
+  <tr><th>Bug reproduction repository</th><td>https://github.com/ExpertVagabond/t3n-sdk-manifest-bug</td></tr>
+  <tr><th>Deployed</th><td>testnet &middot; <code>contract_id 896</code> &middot; v0.1.6 &middot; <code>@terminal3/t3n-sdk@5.2.0</code> (pinned, see Finding 2)</td></tr>
+  <tr><th>Licence</th><td>MIT</td></tr>
+</table>
+
+<h2>1. The problem</h2>
+<p>An enterprise tells an agent to send a payment notification. The agent calls the API, gets
+<code>200 OK</code>, and reports success. Three weeks later the vendor says they never received it, and
+all anyone has is a log line saying <code>200</code>.</p>
+<p>Transports lie. A mail API returns 200 and saves a draft. A webhook returns 202 and drops the
+job. A retry double-charges because the first attempt was recorded as failed when it had actually
+succeeded. An agent that reports success from a status code will eventually report something that
+did not happen &mdash; and in an enterprise, that is the failure that costs money and trust.</p>
+
+<h2>2. What was built</h2>
+<p>A TEE contract that makes that outcome structurally impossible, by splitting every side effect
+into two phases that cannot be collapsed.</p>
+<table>
+  <tr><th>Function</th><th>Guarantee</th></tr>
+  <tr><td><code>submit-action</code></td><td>Performs the effect <b>at most once</b> per idempotency key.
+    Can only ever produce <code>pending_verification</code>. <b>There is no input that makes it return
+    <code>confirmed</code>.</b></td></tr>
+  <tr><td><code>verify-action</code></td><td>Issues a <b>different</b> request that reads back the state the
+    effect was supposed to change. This is the only transition into <code>confirmed</code>.</td></tr>
+  <tr><td><code>get-record</code> / <code>list-records</code></td><td>Read the append-only ledger.</td></tr>
+</table>
+<pre>                          transport errored
+     submit-action ---------------------------&gt;  failed        (safe to resubmit)
+          |
+          | transport accepted
+          v
+   pending_verification
+          |
+          | verify-action  (an INDEPENDENT read-back)
+          |--------- expectation met -------&gt;  confirmed
+          \--------- expectation missed ----&gt;  unverified    (do NOT auto-retry)</pre>
+<p><code>unverified</code> is deliberately terminal. An action that may have half-succeeded is the single
+most dangerous thing to retry automatically &mdash; that is how one invoice becomes two payments &mdash;
+so the contract escalates to a human instead of guessing.</p>
+<p>Every write anchors a SHA-256 of the record in the transaction&rsquo;s Merkle leaf via
+<code>kv-store.set-claims-digest</code>, so an auditor can verify a receipt <b>offline</b>, without trusting
+the node that served it.</p>
+
+<h3>The expectation model</h3>
+<pre>"expect": {
+  "status": 200,
+  "body_contains": ["INV-1042", "\"state\":\"delivered\""],
+  "body_absent":   ["\"state\":\"queued\"", "\"state\":\"failed\""]
+}</pre>
+<p><code>body_absent</code> is not decoration. The case that motivated it: a mail transport reported
+success and the message did exist &mdash; flagged as an auto-saved draft rather than a sent message.
+Presence alone would have confirmed a send that never happened. That scenario is covered by a unit
+test, <code>presence_of_a_draft_marker_blocks_confirmation</code>.</p>
+
+<h2>3. Why this, and not another credential vault</h2>
+<p>The obvious enterprise agent on a TEE is a sealed-credential demo. That work answers
+<i>&ldquo;who is allowed to act.&rdquo;</i> It does not answer <i>&ldquo;did the act happen.&rdquo;</i>
+The second question is where agent deployments actually break: an agent reports a disbursement it
+never made, a retry sends the same invoice twice, and an audit six months later turns up nothing
+but a log line reading <code>200 OK</code>. Procurement asks the first question once. Audit asks the
+second every quarter, forever.</p>
+
+<h2>4. Proven end to end on testnet</h2>
+<p>A deliberately unreliable endpoint was deployed to test against. Its <code>POST /notify</code>
+<b>always</b> returns 200. Its <code>GET /deliveries</code> reports what actually happened.</p>
+<pre>$ ./t3n submit example-action-lying.json
+  status=pending_verification  effect_code=200  verify_attempts=0
+  reason: transport accepted the request; not yet independently verified
+
+$ ./t3n verify demo-lying-001
+  status=unverified  effect_code=200  verify_attempts=1
+  reason: expected response to contain "\"state\": \"delivered\""
+
+$ ./t3n submit example-action-lying.json      # replay the same key
+  status=unverified  effect_code=200  verify_attempts=1
+  -&gt; no second outbound call was made</pre>
+<p>The transport returned 200 and the contract still refused to call it a success. The independent
+read-back caught that the notification was never delivered and named the exact clause that failed.
+Replaying the same idempotency key returned the stored record without a second outbound call.</p>
+<p class="shot">[SCREENSHOT] <b>04-lying-transport.png</b> &mdash;
+https://t3n-verified-actions.pages.dev/img/04-lying-transport.png</p>
+<p class="shot">[SCREENSHOT] <b>07-happy-path.png</b> (confirmed path + ledger) &mdash;
+https://t3n-verified-actions.pages.dev/img/07-happy-path.png</p>
+<p class="shot">[SCREENSHOT] <b>08-deploy.png</b> (register, ACL, self-grant) &mdash;
+https://t3n-verified-actions.pages.dev/img/08-deploy.png</p>
+<p class="shot">[SCREENSHOT] <b>01-tests.png</b> (7 tests, no credentials) &mdash;
+https://t3n-verified-actions.pages.dev/img/01-tests.png</p>
+<p class="shot">[SCREENSHOT] <b>02-component.png</b> (built component interface) &mdash;
+https://t3n-verified-actions.pages.dev/img/02-component.png</p>
+<p class="shot">[SCREENSHOT] <b>03-doctor.png</b> (preflight) &mdash;
+https://t3n-verified-actions.pages.dev/img/03-doctor.png</p>
+<p class="shot">[SCREENSHOT] <b>09-recovery.png</b> (surviving a mid-flow failure) &mdash;
+https://t3n-verified-actions.pages.dev/img/09-recovery.png</p>
+
+<h2>5. Ease of maintenance</h2>
+<p>This was treated as the primary requirement.</p>
+<ul>
+  <li><b>The risky logic is isolated and natively testable.</b> <code>src/record.rs</code> is pure &mdash; no
+      host calls, no I/O &mdash; so the state machine is covered by 7 unit tests that run in ~0.1s with
+      no TEE, node, credentials or network.</li>
+  <li><b>No infrastructure.</b> No database, container, queue, scheduler or message bus. One WASM
+      component, one tenant KV map, one CLI.</li>
+  <li><b>The verification contract is data, not code.</b> An action declares its own probe and
+      expectation as JSON. Adding a new verifiable action is a payload, never a redeploy.</li>
+  <li><b>One CLI for the whole lifecycle</b>, every command idempotent: <code>doctor</code>,
+      <code>deploy</code>, <code>submit</code>, <code>verify</code>, <code>get</code>, <code>list</code>.</li>
+  <li><b><code>list</code> reports the parameters it actually sent.</b> A listing that quietly ignored
+      <code>--limit</code> would be exactly the unverified answer this project exists to refuse.</li>
+  <li><b><code>deploy</code> re-points the map ACL</b> on every re-registration, closing the
+      <code>AccessDenied</code> trap the docs warn about.</li>
+  <li><b>Failure modes documented from experience.</b> Every entry in the runbook is something that
+      actually happened during this build, with the fix that resolved it.</li>
+</ul>
+
+<h2>6. Handover</h2>
+<p><b>I would like Terminal 3 to take ownership and host it.</b> MIT licensed, and the handover doc
+is written for exactly that.</p>
+<h3>The handover package</h3>
+<table>
+  <tr><th>Item</th><th>Where</th></tr>
+  <tr><td>Source, MIT</td><td>github.com/ExpertVagabond/t3n-verified-actions</td></tr>
+  <tr><td>Contract</td><td><code>z:&lt;tid&gt;:verified-actions</code> &middot; testnet <code>contract_id 896</code> &middot; v0.1.6</td></tr>
+  <tr><td>Storage</td><td>one private tenant KV map, <code>z:&lt;tid&gt;:actions</code>, owned by the contract</td></tr>
+  <tr><td>Build</td><td><code>cargo build --target wasm32-wasip2 --release</code> &rarr; 243 KB component</td></tr>
+  <tr><td>Deploy</td><td><code>./t3n deploy --allow-host &lt;host&gt;</code> &mdash; registers, re-points the map ACL, issues the grant</td></tr>
+  <tr><td>Operations</td><td><code>RUNBOOK.md</code> &mdash; deployed state, every status, seven failure modes with fixes</td></tr>
+  <tr><td>Onboarding</td><td><code>HANDOVER.md</code> &mdash; six-step day-one checklist, assumes no contact with me</td></tr>
+  <tr><td>Delete on handover</td><td><code>demo-endpoint/</code> and <code>submission-site/</code> &mdash; neither is the product</td></tr>
+</table>
+<p>Nothing is bound to me except the <code>contract_id</code> recorded in the runbook, which is
+documentation rather than configuration. No account to transfer, no secret to rotate, no domain to move.</p>
+<h3>Why keep it running</h3>
+<ul>
+  <li><b>It is infrastructure, not a vertical demo.</b> A payroll agent serves payroll teams. This
+      serves <i>every</i> agent on T3N that performs a side effect.</li>
+  <li><b>It makes a T3N differentiator legible.</b> &ldquo;Here is a receipt your auditor can verify
+      without trusting the node&rdquo; is a concrete answer to the question every enterprise buyer asks,
+      and this is a working demonstration of <code>set-claims-digest</code>.</li>
+  <li><b>Running it costs approximately nothing.</b> Invoked on demand, no background process, one
+      small JSON record per action with bodies excluded.</li>
+  <li><b>It already survived contact with reality.</b> When my credits ran out mid-flow, a record
+      stranded in <code>pending_verification</code> was neither lost nor falsely confirmed, and settled
+      correctly once credits returned.</li>
+</ul>
+
+<h2>7. Bugs and docs gaps</h2>
+<p>Nine findings, every one reproduced before it was written down.</p>
+
+<h3>Finding 1 (Critical, silent) — <code>kv-store.scan</code> returns unresolved storage envelopes instead of values</h3>
+<p>A value above the storage inlining threshold comes back from <code>scan</code> as an internal reference
+envelope rather than the stored bytes:</p>
+<pre>T3VR{"value_cid":[101,139,85,123,...32 bytes...],"size_bytes":1011,"storage_lo...</pre>
+<p><code>get</code> on the exact same key dereferences correctly. So a contract that writes with
+<code>put</code> and reads with <code>get</code> works perfectly, while the same record read through
+<code>scan</code> is unparseable. <b>Nothing errors.</b> A contract enumerating its own storage receives
+data that looks structurally plausible and is not the data it stored.</p>
+<p><b>What makes it dangerous: small values come back intact.</b> A 12-byte key returned fine while
+three ~1 KB records returned envelopes, so a smoke test on small values passes and the bug only
+appears at realistic payload sizes. Reproduced on testnet 2026-09-06 with <code>contract_id 894</code>,
+which returned <code>scanned=4, value_lens=[12, 309, 310, 313]</code> where <code>size_bytes</code> in the
+envelopes was 1011.</p>
+<p><b>Workaround:</b> take keys from <code>scan</code>, read values with <code>get</code>.
+To be clear about what is <i>not</i> broken: <code>scan</code>&rsquo;s range and limit semantics are correct.
+I initially believed they were ignored and that was wrong &mdash; it was caused by Finding 3, which
+meant the parameters never reached the contract.</p>
+
+<h3>Finding 2 (Critical, blocking) — the published quickstart is broken for every new developer</h3>
+<p><code>@terminal3/t3n-sdk</code> &ge; 5.3.0 cannot reach testnet at all.
+<code>fetchTrustedManifest("testnet")</code> throws <code>Trust manifest ... is malformed</code> <i>before
+authentication is attempted</i>, so it presents as a credential problem when it is not.</p>
+<p><b>Root cause:</b> <code>isSignedTrustManifest</code> requires an <code>rtmr1_allowlist</code> array. The
+endpoint returns HTTP 200 and valid JSON but publishes only <code>cluster, version, peer_ids,
+rtmr3_allowlist, signed_at, signature</code>. One missing field fails the whole validation.
+<b>Bisected:</b> 5.2.0 OK, 5.3.0 FAIL (shipped 2026-08-28). It cannot be patched client-side:
+<code>signature</code> covers the canonicalised payload, so injecting the field breaks signature
+verification.</p>
+<blockquote>Reported to Ian Chong (DevRel Lead) 2026-09-06. Reply 2026-09-07:
+&ldquo;Thank for the heads up and yes please use sdkv5.2 for this challenge.&rdquo;</blockquote>
+<p class="shot">[SCREENSHOT] <b>05-sdk-bug.png</b> &mdash; https://t3n-verified-actions.pages.dev/img/05-sdk-bug.png</p>
+<p class="shot">[SCREENSHOT] <b>06-decode.png</b> &mdash; https://t3n-verified-actions.pages.dev/img/06-decode.png</p>
+
+<h3>Finding 3 (High) — the SDK clobbers <code>process.argv</code> at import time</h3>
+<p>Importing the SDK initialises a WASI shim, and trailing command-line flags are gone from
+<code>process.argv</code> by the time application code reads them. A CLI that parses <code>process.argv</code>
+after importing the SDK silently falls back to its defaults &mdash; <code>--limit 1</code> arrived at the
+contract as <code>100</code>, producing a wrong answer with no error. Anyone building a CLI on this SDK
+will hit it. Workaround: snapshot the arguments in the shell before Node starts.</p>
+
+<h3>Finding 4 (High) — test credits are exhausted far faster than advertised</h3>
+<p>The ADK page offers &ldquo;20,000 test credits &mdash; enough for 25 agents and ~5,000 protected
+actions.&rdquo; My allocation reached zero after <b>7 contract registrations and roughly 25
+invocations</b>. Authentication still succeeds afterwards, so the failure only appears once you try
+to do work &mdash; including read-only calls like <code>get-record</code>, which makes a dead allocation look
+like a broken contract. Each <code>deploy</code> is a registration, so ordinary debugging burns the budget.</p>
+
+<h3>Finding 5 (Medium) — SDK errors print ~1.6 MB of obfuscated bundle</h3>
+<p>A rejection inside <code>fetchTrustedManifest</code> puts the entire minified <code>index.esm.js</code> in
+the stack trace, burying the actual message.</p>
+
+<h3>Finding 6 (Medium) — the package <code>exports</code> map blocks deep imports</h3>
+<p><code>exports</code> declares only <code>"."</code> and <code>"./wasm/generated/session.js"</code>, so
+<code>require("@terminal3/t3n-sdk/package.json")</code> &mdash; the ordinary way to report which version you
+are on &mdash; fails with <code>ERR_PACKAGE_PATH_NOT_EXPORTED</code>.</p>
+
+<h3>Finding 7 (Medium) — the quickstart does not warn you will need three credentials</h3>
+<p>Step 4 needs three separate credentials (tenant, agent, user), each with its own DID and its own
+credit balance, and the claim page is Google-SSO-only. What rescued it is one sentence in step 4:
+for a direct call you may set <code>agentDid</code> to your own DID. That self-grant deserves to be in
+the prerequisites.</p>
+
+<h3>Finding 8 (Medium) — <code>maps.create</code> and <code>maps.update</code> disagree on how to pass the tail</h3>
+<p><code>maps.create({ tail, ... })</code> takes the tail inside the object. <code>maps.update</code>,
+<code>maps.getStatus</code> and <code>maps.entryGet</code> take it <b>positionally</b>. The object form fails
+with <code>Tenant name tail must match /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,127}$/</code> &mdash; an error that
+points at your tail name when the tail name is fine.</p>
+
+<h3>Finding 9 (Low) — <code>contract_id</code> is unrecoverable after re-registration</h3>
+<p>Re-registering a tail allocates a new <code>contract_id</code>, and map ACLs are scoped by it, so a
+re-registration silently orphans them. <code>contracts.listDetailed()</code> returns name, version and
+status but not the id. Adding it there would remove a whole class of confusing failure.</p>
+
+<h2>8. What worked well</h2>
+<ul>
+  <li><b>Agent-readable docs.</b> Every page serves as <code>.md</code>, and <code>/llms.txt</code> indexes
+      the lot. That made research fast and accurate. More platforms should do this.</li>
+  <li><b>The capability model is the right one.</b> &ldquo;The WIT imports <i>are</i> the capability
+      set&rdquo; means a contract cannot quietly acquire a permission it did not declare, and there is
+      no second source of truth to drift.</li>
+  <li><b><code>set-claims-digest</code> is underrated.</b> Anchoring an application-defined hash in the
+      Merkle leaf so a receipt can be checked offline is the single feature that made this project
+      worth building on T3N rather than ordinary infrastructure.</li>
+  <li><b>Outbound authorisation belonging to the user, not the contract</b>, is correct and unusual,
+      and it is enforced in practice &mdash; an ungranted host is refused, not warned about.</li>
+</ul>
+
+<h2>9. Verify it yourself</h2>
+<pre>git clone https://github.com/ExpertVagabond/t3n-verified-actions
+cd t3n-verified-actions
+cargo test                                      # 7 passed, no credentials
+rustup target add wasm32-wasip2
+cargo build --target wasm32-wasip2 --release
+wasm-tools component wit target/wasm32-wasip2/release/z_verified_actions.wasm</pre>
+<p>The SDK bug, in about thirty seconds, also with no credentials:</p>
+<pre>git clone https://github.com/ExpertVagabond/t3n-sdk-manifest-bug
+cd t3n-sdk-manifest-bug &amp;&amp; npm install
+npm run repro     # fails on 5.10.0
+npm run decode    # prints the field the validator wants and the server omits
+npm run bisect    # the full version matrix</pre>
+<p>Or click a button at <b>https://t3n-verified-actions.pages.dev</b> and watch a typical agent and
+this one reach opposite conclusions from the same 200 response.</p>

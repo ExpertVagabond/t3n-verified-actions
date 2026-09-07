@@ -136,6 +136,7 @@
       <a class="btn primary" href="https://github.com/ExpertVagabond/t3n-verified-actions">Agent repo</a>
       <a class="btn" href="https://github.com/ExpertVagabond/t3n-sdk-manifest-bug">Bug reproduction</a>
       <a class="btn" href="#findings">9 findings</a>
+      <a class="btn" href="#worked">What worked</a>
       <a class="btn" href="#handover">Handover</a>
     </div>
   </div>
@@ -387,7 +388,12 @@
       <li><b>A runbook and a handover doc</b> written for someone with no contact with me: deployed
       state, every status and what to do about it, the failure modes I actually hit, and the design
       decisions worth revisiting.</li>
-      <li>No database, no daemon, no scheduler, no hosted service, nothing to transfer.</li>
+      <li><b>No infrastructure.</b> No database, container, queue, scheduler or message bus. One WASM
+      component, one tenant KV map, one CLI.</li>
+      <li><b>The verification contract is data, not code.</b> An action declares its own probe and
+      expectation as JSON. Adding a new verifiable action is a payload, never a redeploy.</li>
+      <li><b>Failure modes are documented from experience, not imagination.</b> Every entry in the
+      runbook is something that actually happened during this build, with the fix that resolved it.</li>
     </ul>
     <blockquote><p><b>Handover preference: I would like Terminal 3 to take ownership and host it.</b>
     It is MIT-licensed and the handover doc is written for exactly that.</p></blockquote>
@@ -443,10 +449,58 @@
   </div>
 </section>
 
+
+<section id="worked">
+  <div class="wrap">
+    <h2>What worked well</h2>
+    <p class="sub">Findings are more useful with their opposite alongside them.</p>
+    <p><b>The docs being agent-readable is a real advantage.</b> Every page serves as
+    <code>.md</code>, and <code>/llms.txt</code> indexes the lot. That made research fast and accurate, and it
+    is why the walkthrough could be followed precisely rather than guessed at. More platforms should
+    do this.</p>
+    <p><b>The capability model is the right one.</b> &ldquo;The WIT imports <em>are</em> the capability
+    set &mdash; there is no separate manifest&rdquo; means a contract cannot quietly acquire a permission
+    it did not declare, and the declaration is the same artefact the host links against. There is no
+    second source of truth to drift.</p>
+    <p><b><code>set-claims-digest</code> is underrated.</b> Anchoring an application-defined hash in the
+    transaction&rsquo;s Merkle leaf, so a receipt can be checked offline, is the single feature that made
+    this project worth building on T3N rather than on ordinary infrastructure. It deserves more
+    prominence than one line in a WIT comment.</p>
+    <p><b>Outbound authorisation belonging to the user, not the contract, is correct and unusual.</b>
+    Most platforms let the code declare its own egress. Resolving allowed hosts from the caller&rsquo;s
+    grant at dispatch time is a stronger model, and it is enforced in practice &mdash; an ungranted host
+    is refused, not warned about.</p>
+    <p><b>The self-grant escape hatch saved this submission.</b> One sentence in step 4 &mdash; that a
+    direct call may set <code>agentDid</code> to your own DID &mdash; is what let the whole flow run on a
+    single claimed credential. It deserves to be in the prerequisites rather than buried.</p>
+  </div>
+</section>
+
 <section id="findings">
   <div class="wrap">
     <h2>Bugs and docs gaps</h2>
     <p class="sub">Nine findings. Every one reproduced before it was written down.</p>
+
+    <div class="finding crit">
+      <h3><span class="tag crit">Critical</span><code>kv-store.scan</code> silently returns unresolved storage envelopes instead of values</h3>
+      <p><b>This one is silent.</b> Nothing errors. A contract that enumerates its own storage
+      through <code>scan</code> receives data that looks structurally plausible and is not the data it
+      stored, and finds out only when parsing fails downstream &mdash; or worse, does not.</p>
+      <p>A value above the storage inlining threshold comes back from <code>scan</code> as an internal
+      reference envelope rather than the stored bytes:</p>
+      <pre class="code">T3VR{"value_cid":[101,139,85,123,&hellip;32 bytes&hellip;],"size_bytes":1011,"storage_lo&hellip;</pre>
+      <p><code>get</code> on the exact same key dereferences correctly. So a contract that writes with
+      <code>put</code> and reads with <code>get</code> works perfectly, while the same record read through
+      <code>scan</code> is unparseable.</p>
+      <p><b>What makes this genuinely dangerous: small values come back intact.</b> A 12-byte key
+      returned fine while three ~1&nbsp;KB records returned envelopes, so a smoke test on small values
+      passes and the bug only appears at realistic payload sizes.</p>
+      <p class="muted">To be clear about what is <em>not</em> broken: <code>scan</code>&rsquo;s range and limit
+      semantics are correct. I initially believed they were ignored and that was wrong &mdash; it was
+      caused by the <code>process.argv</code> issue below, which meant my parameters never reached the
+      contract. Verified after fixing: <code>[a,d)</code> returns 0, <code>[a,demo-m)</code> returns 2,
+      <code>start=z</code> returns 0.</p>
+    </div>
 
     <div class="finding crit">
       <h3><span class="tag crit">Critical</span>The published quickstart is broken for every new developer</h3>
@@ -473,24 +527,6 @@
         greppable. Rather than reimplement the deobfuscator, the script lets the bundle decode itself
         and diffs required against served. Result: <code>MISSING: rtmr1_allowlist</code>.</figcaption>
       </figure>
-    </div>
-
-    <div class="finding high">
-      <h3><span class="tag high">High</span><code>kv-store.scan</code> returns unresolved storage envelopes instead of values</h3>
-      <p>A value above the storage inlining threshold comes back from <code>scan</code> as an internal
-      reference envelope rather than the stored bytes:</p>
-      <pre class="code">T3VR{"value_cid":[101,139,85,123,&hellip;32 bytes&hellip;],"size_bytes":1011,"storage_lo&hellip;</pre>
-      <p><code>get</code> on the exact same key dereferences correctly. So a contract that writes with
-      <code>put</code> and reads with <code>get</code> works perfectly, while the same record read through
-      <code>scan</code> is unparseable.</p>
-      <p><b>What makes this genuinely dangerous: small values come back intact.</b> A 12-byte key
-      returned fine while three ~1&nbsp;KB records returned envelopes, so a smoke test on small values
-      passes and the bug only appears at realistic payload sizes.</p>
-      <p class="muted">To be clear about what is <em>not</em> broken: <code>scan</code>&rsquo;s range and limit
-      semantics are correct. I initially believed they were ignored and that was wrong &mdash; it was
-      caused by the <code>process.argv</code> issue below, which meant my parameters never reached the
-      contract. Verified after fixing: <code>[a,d)</code> returns 0, <code>[a,demo-m)</code> returns 2,
-      <code>start=z</code> returns 0.</p>
     </div>
 
     <div class="finding high">
