@@ -78,6 +78,19 @@
   blockquote p{margin:0}
   footer{padding:44px 0 72px;color:var(--dim);font-size:14px}
   ul{max-width:68ch;padding-left:22px} li{margin-bottom:9px}
+  /* Platform status banner */
+  .status{background:linear-gradient(180deg,#221a0d 0%,#1a1710 100%);border-bottom:1px solid #4a3a18}
+  .status .wrap{padding-top:24px;padding-bottom:24px}
+  .status .slug{display:inline-block;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    font-weight:700;padding:3px 9px;border-radius:5px;margin-bottom:13px;
+    background:rgba(255,200,97,.16);color:var(--warn)}
+  .status h2{font-size:19px;line-height:1.4;margin:0 0 12px;color:var(--fg);letter-spacing:-.01em;max-width:74ch}
+  .status p{font-size:14.5px;color:var(--muted);margin:0 0 11px;max-width:74ch}
+  .status p:last-child{margin-bottom:0}
+  .status b{color:var(--fg)}
+  .status pre{background:#11131a;border:1px solid var(--line);border-radius:8px;
+    padding:13px 15px;margin:13px 0;overflow-x:auto;font-size:13px;line-height:1.55;color:var(--muted)}
+
   /* Interactive demo */
   .try{background:linear-gradient(180deg,#141b2b 0%,var(--panel) 100%);
     border:1px solid var(--line);border-radius:14px;padding:26px;margin:8px 0 0}
@@ -114,6 +127,38 @@
 </style>
 </head>
 <body>
+
+<div class="status">
+  <div class="wrap">
+    <span class="slug">Platform status &middot; 21 September 2026</span>
+    <h2>Invoking contract 896 on T3N testnet currently returns <span class="warn">Internal error</span>.
+    This is a Terminal&nbsp;3 platform upgrade, not a defect in this contract.</h2>
+    <p>On <b>18 September 2026</b> Terminal 3 shipped a breaking change to the <code>host:tenant</code>
+    interface: contract grants became scoped per function rather than per contract. Any contract built
+    against <code>host:tenant@1.0.0</code> stops instantiating the moment its node picks up the new host
+    build, because the old import is no longer answered. Rebuilding requires the new WIT package, which
+    was not published anywhere at the time of writing. Terminal 3 DevRel has acknowledged the breakage,
+    is escalating it with the trace IDs below, and has confirmed the judging team will be told.</p>
+    <p>Authentication succeeds on every attempt, so this is neither credentials nor exhausted credits:</p>
+    <pre>$ ./t3n doctor
+tenant      : ok
+script name : z:99466752729636dd5f033007a5517924fd792902:verified-actions
+registered  : version 0.1.6                <span class="good">&larr; the registry says healthy</span>
+
+$ ./t3n list --limit 1
+[tenant] authenticated as did:t3n:99466752729636dd5f033007a5517924fd792902
+list: RPC Error: Internal error [736a82d8-76de-4c54-96bb-71234a1f0cde]   <span class="bad">&larr; the call is dead</span></pre>
+    <p>Which is the whole argument this submission makes. The status check reports success; only
+    exercising the thing tells the truth. <b>The contract is currently failing its own thesis in public,
+    and the only reason anyone knows that is that something actually tried the call instead of reading
+    the dashboard.</b></p>
+    <p>Everything below is unaffected and was re-verified today: <a href="#try">the interactive demo</a>
+    makes real calls to a live endpoint, both repositories build, and the nine findings stand.
+    Server trace IDs, 20&ndash;21 September:
+    <span class="mono" style="font-size:12.5px">736a82d8&hellip;, 85fce47a&hellip;, ae795523&hellip;,
+    1b84fd94&hellip;, caa45a91&hellip;, d0737415&hellip;</span></p>
+  </div>
+</div>
 
 <header>
   <div class="wrap">
